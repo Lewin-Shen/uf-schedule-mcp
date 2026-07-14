@@ -1,0 +1,54 @@
+{
+  "name": "uf-schedule-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for searching the University of Florida Schedule of Courses (one.uf.edu)",
+  "type": "module",
+  "bin": {
+    "uf-schedule-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "manifest.json",
+    "icon.png",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "start": "node dist/index.js",
+    "test": "node --import tsx --test test/*.test.ts",
+    "bundle": "node scripts/build-mcpb.mjs",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "modelcontextprotocol",
+    "university-of-florida",
+    "uf",
+    "courses",
+    "schedule-of-courses"
+  ],
+  "author": "Lewin (https://github.com/Lewin-Shen)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lewin-Shen/uf-schedule-mcp.git"
+  },
+  "homepage": "https://github.com/Lewin-Shen/uf-schedule-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/Lewin-Shen/uf-schedule-mcp/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}

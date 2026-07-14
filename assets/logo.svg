@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="UF Schedule of Courses">
+  <title>UF Schedule of Courses</title>
+  <rect width="256" height="256" rx="56" fill="#0021A5"/>
+  <!-- U -->
+  <path d="M56 70 L56 140 A30 30 0 0 0 116 140 L116 70"
+        fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- F -->
+  <path d="M142 70 L142 176 M142 70 L198 70 M142 124 L190 124"
+        fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

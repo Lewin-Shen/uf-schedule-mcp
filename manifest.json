@@ -1,0 +1,36 @@
+{
+  "manifest_version": "0.2",
+  "name": "uf-schedule-mcp",
+  "display_name": "UF Schedule of Courses",
+  "version": "1.0.0",
+  "description": "Search the University of Florida Schedule of Courses.",
+  "long_description": "Search the public University of Florida Schedule of Courses (one.uf.edu) by term, department, course code, instructor, credits, days/periods, gen-ed, writing, Quest, online type and more. Accepts human-friendly inputs (e.g. 'Fall 2026', 'Mathematics') and resolves them to UF's internal codes.",
+  "author": {
+    "name": "Lewin",
+    "url": "https://github.com/Lewin-Shen"
+  },
+  "homepage": "https://github.com/Lewin-Shen/uf-schedule-mcp",
+  "documentation": "https://github.com/Lewin-Shen/uf-schedule-mcp#readme",
+  "license": "MIT",
+  "icon": "icon.png",
+  "keywords": ["university-of-florida", "uf", "courses", "schedule", "education"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"]
+    }
+  },
+  "tools": [
+    { "name": "search_courses", "description": "Search the UF Schedule of Courses with full filters." },
+    { "name": "get_filter_options", "description": "List valid term / department / level / category codes." },
+    { "name": "get_course", "description": "Look up one course and its sections by code." }
+  ],
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}
