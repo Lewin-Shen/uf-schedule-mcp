@@ -12,6 +12,40 @@ inputs (term names, department names, day letters) instead of UF's internal code
 > Public data only — it exercises the same public search form a normal visitor would.
 > No login, no scraping of protected pages, no rate-limit evasion.
 
+## Beyond linear search
+
+The point isn't the single lookup — [one.uf.edu](https://one.uf.edu/soc/) already does that. The point
+is that structured, chainable tools let an agent run **multi-step, branching investigations** that a
+linear search can't: dozens of dependent queries, cross-referenced against an outside source,
+reconciled where they disagree, and synthesized into an answer the underlying data never states
+directly. Every tool returns typed JSON and resolves human inputs to UF's internal codes, so the
+model can plan a query, read the result, and decide the next one — no human in the loop per hop.
+
+### Example: auditing a graduate certificate
+
+UF's [Institute for Computational Engineering (ICE)](https://www.eng.ufl.edu/ice/program-curriculum/)
+publishes a *Graduate Certificate in Scientific Computing*: 2 core courses plus ~30 approved
+electives. An obvious question — *"which of these are actually still offered, and when?"* — is not
+answerable by any single search, and the curriculum page itself can't tell you. An agent using this
+server:
+
+1. **Read the certificate's course list** from the ICE page — 29 unique course numbers spanning
+   seven departments.
+2. **Fanned out ~260 dependent lookups** — every course number × 9 terms (Fall 2023 → Fall 2026) —
+   parallelized across sub-agents.
+3. **Classified each course** as actively offered, dormant, or long-discontinued, and inferred its
+   typical term and cadence (*every Fall*, *every Spring*, *~biennial*) plus the term last taught.
+4. **Caught what the list couldn't say**: numbers whose live title no longer matches the certificate
+   (`CES 6165` now runs as *Concrete Structural Rehabilitation*; `EEL 6533` as *Data Analytics and
+   Decision Sciences*), and special-topics umbrellas (`CIS 6930`, `EGM 6934`, `EEL 6935`) where the
+   number is active but the *specific* certificate topic may not be.
+5. **Synthesized the finding**: 16 of 29 still active, 2 dormant, 11 not taught in 3+ years — and,
+   most usefully for an advisor, that **both core courses are shaky** (the VVUU core hasn't run
+   since Spring 2024).
+
+That's the pattern this server is built for: the model plans the queries, reacts to what comes back,
+and produces a conclusion rather than a result list.
+
 ## Tools
 
 | Tool | Description |
