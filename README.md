@@ -63,6 +63,18 @@ and produces a conclusion rather than a result list.
 `affordable_uf`, `experiential_learning`, `honors`, `no_open_seats`, `special_program`.
 Set `fetch_all: true` to auto-paginate up to `max_results`.
 
+Two filters worth knowing:
+
+- **`name_contains`** — a client-side filter over the *full* course name. `course_title` is
+  passed upstream and only matches the **base catalog title**, so it misses special-topics
+  suffixes (`course_title: "GPU"` finds nothing; `name_contains: "GPU"` finds *Special Topics
+  in Electrical Engineering: GPU Computing*). Pair it with `department` or `course_code` to
+  keep the fetch small.
+- **`compact`** (default `true`) — trims bulky per-section fields. Set `compact: false` for
+  seats, wait-list, fees, deadlines, `acadCareer`, and gen-ed/quest attributes. Compact keeps
+  the decisive small ones (`classNumber`, `credits`, `instructors`, `delivery`, `gradBasis`,
+  `meet`). Default responses are ~2.8× smaller than full.
+
 ---
 
 ## Install
@@ -118,7 +130,8 @@ Run `npm install && npm run build` first so `dist/` exists, then fully quit and 
 git clone https://github.com/Lewin-Shen/uf-schedule-mcp.git
 cd uf-schedule-mcp
 npm install          # runs the TypeScript build via the "prepare" script
-npm test             # unit tests for the query builder + resolvers (no network)
+npm test             # unit tests: query builder, resolvers, dedupe, meet mapping (no network)
+npm run smoke        # live known-answer checks against the real API (network required)
 npm start            # run the server on stdio
 npm run bundle       # build uf-schedule-mcp.mcpb (Claude Desktop extension)
 ```
@@ -163,13 +176,26 @@ The server is a thin, typed wrapper over `GET https://one.uf.edu/apix/soc/schedu
 query parameter, the enumerations, pagination, and the response schema — is in
 [`docs/API-REFERENCE.md`](docs/API-REFERENCE.md).
 
-## Caveats
+## Data limits (verified, not guesses)
 
-- Seat counts and meeting times are often unpublished for future terms; the tools pass
-  through whatever the API returns.
-- Special-topics numbers (e.g. `CIS 6930`) reuse one code for many rotating topics.
-- `no_open_seats` filter direction and the legacy `var-cred` / `ge` params are passed
-  through as documented in the reference.
+- **Meeting times and locations are login-gated.** `meet` always comes back as `"TBA"`. This
+  is UF's doing, not a gap in this server: the SOC UI itself says *"Log in to view additional
+  details like locations, dates, times, and final exams."* The public API returns
+  `meetTimes: []` for **every** section — confirmed across hundreds of sections in multiple
+  departments and terms (Fall 2025 and Fall 2026). The mapping is implemented, so the data
+  appears the moment an authenticated session supplies it.
+- **`openSeats` is always `null`** for the same reason.
+- **No syllabi.** SOC carries none; Simple Syllabus (GatorLink-gated) is the source.
+- **`credits` filtering is loose upstream.** `credits=2, credits_operator="equal"` also
+  matches *variable*-credit courses whose range merely includes 2 (e.g. `VAR 1–15`). Check
+  `credits` in the response if you need a fixed-credit course.
+- **`total_matching` counts upstream rows (course codes), not course objects.** One
+  special-topics row expands into one entry per topic — `EEL5934` is `TOTALROWS: 1` but six
+  courses. Pagination therefore tracks `RETRIEVEDROWS`, not entry count.
+- **Special-topics codes reuse one `courseId`** across every topic (all six `EEL5934` topics
+  share `011774`), so de-duplication keys on `courseId + name`.
+- `no_open_seats` direction and the legacy `var-cred` / `ge` params are passed through as
+  documented in the reference.
 
 ## License
 

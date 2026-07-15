@@ -292,27 +292,48 @@ export function queryToUrl(params: Record<string, string>): string {
 }
 
 // --- response simplification ------------------------------------------------
-function formatMeetTimes(meetTimes: any[]): any[] {
+
+/**
+ * Map upstream meetTimes[] into the compact form {days, periods, time, bldg, room}.
+ *
+ * NOTE: UF gates meeting times/locations behind GatorLink login — the SOC UI itself
+ * says "Log in to view additional details like locations, dates, times, and final
+ * exams." The public API therefore returns meetTimes: [] for EVERY section (verified
+ * across 100s of sections, multiple departments and terms, Fall 2025 and Fall 2026).
+ * We map it anyway so it works the moment UF exposes it (or a session supplies it),
+ * and return "TBA" rather than omitting the field, so callers can tell
+ * "not published" apart from "field missing".
+ */
+export function formatMeet(meetTimes: any[]): any[] | string {
   const out: any[] = [];
   for (const m of meetTimes ?? []) {
     let days = m.meetDays ?? m.meetDay ?? m.days;
     if (Array.isArray(days)) days = days.join("");
+    const pb = m.meetPeriodBegin ?? "";
+    const pe = m.meetPeriodEnd ?? "";
+    const periods =
+      pb && pe && String(pb) !== String(pe) ? `${pb}-${pe}` : String(pb || pe || "");
+    const tb = m.meetTimeBegin ?? m.beginTime ?? "";
+    const te = m.meetTimeEnd ?? m.endTime ?? "";
     const entry: Record<string, any> = {
       days: days || "",
-      begin: m.meetTimeBegin ?? m.beginTime ?? "",
-      end: m.meetTimeEnd ?? m.endTime ?? "",
-      periodBegin: m.meetPeriodBegin ?? "",
-      periodEnd: m.meetPeriodEnd ?? "",
-      building: m.meetBuilding ?? m.meetBldgCode ?? "",
+      periods,
+      time: tb && te ? `${tb}-${te}` : "",
+      bldg: m.meetBldgCode ?? m.meetBuilding ?? "",
       room: m.meetRoom ?? "",
     };
-    for (const k of Object.keys(entry)) if (entry[k] === "") delete entry[k];
-    out.push(entry);
+    for (const k of Object.keys(entry)) if (!entry[k]) delete entry[k];
+    if (Object.keys(entry).length) out.push(entry);
   }
-  return out;
+  return out.length ? out : "TBA";
 }
 
-function simplifySection(s: any): Record<string, any> {
+function truncate(s: any, n: number): string {
+  const t = String(s ?? "");
+  return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t;
+}
+
+function simplifySection(s: any, compact: boolean): Record<string, any> {
   const credits =
     s.credits === "VAR"
       ? { variable: true, min: s.credits_min, max: s.credits_max }
@@ -323,27 +344,33 @@ function simplifySection(s: any): Record<string, any> {
     section: s.number,
     credits,
     instructors: (s.instructors ?? []).map((i: any) => i?.name).filter(Boolean),
-    meetTimes: formatMeetTimes(s.meetTimes ?? []),
+    meet: formatMeet(s.meetTimes ?? []),
     delivery: SECTWEB_LABELS[sectWeb] ?? sectWeb,
-    deliveryCode: sectWeb,
-    openSeats: s.openSeats,
-    department: s.deptName,
-    gradBasis: s.gradBasis,
-    acadCareer: s.acadCareer,
-    genEd: s.genEd ?? [],
-    quest: s.quest ?? [],
-    grWriting: s.grWriting,
-    note: s.note ?? "",
-    dropAddDeadline: s.dropaddDeadline,
+    gradBasis: s.gradBasis, // tiny + decisive (SUS = research/thesis/seminar credit)
   };
-  const wl = s.waitList ?? {};
-  if (wl && Object.keys(wl).length) {
-    out.waitList = { eligible: wl.isEligible, cap: wl.cap, total: wl.total };
+  if (compact) {
+    if (s.note) out.note = truncate(s.note, 120);
+  } else {
+    out.deliveryCode = sectWeb;
+    out.openSeats = s.openSeats;
+    out.department = s.deptName;
+    out.acadCareer = s.acadCareer;
+    out.genEd = s.genEd ?? [];
+    out.quest = s.quest ?? [];
+    out.grWriting = s.grWriting;
+    out.note = s.note ?? "";
+    out.dropAddDeadline = s.dropaddDeadline;
+    const wl = s.waitList ?? {};
+    if (wl && Object.keys(wl).length) {
+      out.waitList = { eligible: wl.isEligible, cap: wl.cap, total: wl.total };
+    }
+    if (s.isAICourse) out.aiCourse = true;
+    if (s.isElal) out.experientialLearning = s.elalAttr || true;
+    if (s.isSpecialProg) out.specialProgram = s.specialProgAttr || true;
+    if (s.isHonorsClass) out.honors = true;
+    if (s.courseFee) out.courseFee = s.courseFee;
   }
-  if (s.isAICourse) out.aiCourse = true;
-  if (s.isElal) out.experientialLearning = s.elalAttr || true;
-  if (s.courseFee) out.courseFee = s.courseFee;
-  // drop empty-ish keys for compactness
+  // drop empty-ish keys for compactness ("TBA" and 0 survive)
   for (const k of Object.keys(out)) {
     const v = out[k];
     if (v === null || v === undefined || v === "" ||
@@ -355,16 +382,38 @@ function simplifySection(s: any): Record<string, any> {
   return out;
 }
 
-function simplifyCourse(c: any, includeDescription: boolean): Record<string, any> {
+function simplifyCourse(c: any, includeDescription: boolean, compact: boolean): Record<string, any> {
   const out: Record<string, any> = {
     code: c.code,
     name: c.name,
     courseId: c.courseId,
-    sections: (c.sections ?? []).map(simplifySection),
+    sections: (c.sections ?? []).map((s: any) => simplifySection(s, compact)),
   };
   if (c.prerequisites) out.prerequisites = c.prerequisites;
   if (includeDescription && c.description) out.description = c.description;
   return out;
+}
+
+/**
+ * Merge duplicate course objects returned across page boundaries.
+ *
+ * Key is courseId + "|" + name, NOT courseId alone: special-topics courses reuse a
+ * single courseId for every topic (all 6 EEL5934 topics share courseId 011774 with
+ * different names), so merging on courseId would collapse distinct topics into one.
+ */
+export function dedupeCourses(courses: any[]): any[] {
+  const byKey = new Map<string, any>();
+  for (const c of courses) {
+    const key = `${c.courseId ?? c.code}|${c.name ?? ""}`;
+    const seen = byKey.get(key);
+    if (!seen) {
+      byKey.set(key, { ...c, sections: [...(c.sections ?? [])] });
+      continue;
+    }
+    const have = new Set(seen.sections.map((s: any) => s.classNumber));
+    for (const s of c.sections ?? []) if (!have.has(s.classNumber)) seen.sections.push(s);
+  }
+  return [...byKey.values()];
 }
 
 // --- fetch one page ---------------------------------------------------------
@@ -409,6 +458,8 @@ export interface SearchArgs {
   honors?: boolean;
   no_open_seats?: boolean;
   special_program?: string;
+  name_contains?: string;
+  compact?: boolean;
   max_results?: number;
   fetch_all?: boolean;
   last_control_number?: number;
@@ -461,34 +512,57 @@ export async function searchCourses(args: SearchArgs): Promise<Record<string, an
   const maxResults = Math.max(1, Math.trunc(args.max_results ?? 100));
   const includeDescription = args.include_description ?? false;
   const fetchAll = args.fetch_all ?? false;
+  const compact = args.compact ?? true;
+  const needle = (args.name_contains ?? "").trim().toLowerCase();
 
-  const courses: any[] = [];
+  const raw: any[] = [];
   let lcn = Math.trunc(args.last_control_number ?? 0);
-  let total = 0;
+  let total = 0; // TOTALROWS counts upstream ROWS (course codes), not course objects
+  let rowsFetched = 0; // sum of RETRIEVEDROWS — the only correct pagination measure
   let pages = 0;
   let nextLcn: number | null = null;
   let lastParams: Record<string, string> = {};
+
+  // Merge page-boundary duplicates, then apply the client-side name filter.
+  // (Upstream `course-title` only matches the BASE catalog title, so it misses
+  // special-topics suffixes, which live in the course-level `name`.)
+  const process = (list: any[]) => {
+    const merged = dedupeCourses(list);
+    return needle
+      ? merged.filter((c) => String(c.name ?? "").toLowerCase().includes(needle))
+      : merged;
+  };
 
   while (true) {
     lastParams = buildQuery({ ...base, lastControlNumber: lcn });
     const page = await fetchPage(lastParams);
     total = page.TOTALROWS ?? 0;
     const batch: any[] = page.COURSES ?? [];
-    for (const c of batch) courses.push(simplifyCourse(c, includeDescription));
+    const rows = page.RETRIEVEDROWS ?? batch.length;
+    raw.push(...batch);
+    rowsFetched += rows;
     lcn = page.LASTCONTROLNUMBER ?? 0;
     pages += 1;
 
-    if (courses.length >= maxResults) {
-      courses.length = maxResults;
-      if (courses.length < total) nextLcn = lcn;
+    // Paginate on ROWS. A single row can expand to many course objects (every
+    // special-topics section of EEL5934 is its own course object under 1 row), so
+    // comparing course-object count to TOTALROWS ends pagination early.
+    const more = rowsFetched < total;
+    if (process(raw).length >= maxResults) {
+      if (more) nextLcn = lcn;
       break;
     }
     if (!fetchAll) {
-      if (courses.length < total) nextLcn = lcn;
+      if (more) nextLcn = lcn;
       break;
     }
-    if (batch.length < PAGE_SIZE || courses.length >= total || pages >= HARD_PAGE_CAP) break;
+    if (!more || rows === 0 || pages >= HARD_PAGE_CAP) break;
   }
+
+  const matched = process(raw);
+  const courses = matched
+    .slice(0, maxResults)
+    .map((c) => simplifyCourse(c, includeDescription, compact));
 
   const result: Record<string, any> = {
     query: { term: termCode, category: categoryCode, url: queryToUrl(lastParams) },
@@ -496,10 +570,21 @@ export async function searchCourses(args: SearchArgs): Promise<Record<string, an
     returned: courses.length,
     courses,
   };
+  if (needle) {
+    result.name_contains = args.name_contains;
+    result.matched_after_filter = matched.length;
+  }
+  if (matched.length > courses.length && nextLcn === null) {
+    result.note_truncated =
+      `Showing ${courses.length} of ${matched.length} matched courses (max_results=${maxResults}).`;
+  }
   if (nextLcn !== null) {
     result.next_control_number = nextLcn;
     result.note = `More results available - call again with last_control_number=${nextLcn} (or set fetch_all=true).`;
   }
+  result.data_notes =
+    "total_matching counts upstream rows (course codes); a special-topics code expands to one course entry per topic. " +
+    "openSeats and meeting times/locations (meet) require UF login — the public API returns null / \"TBA\".";
   return result;
 }
 
@@ -510,17 +595,24 @@ const FILTER_KEY_MAP: Record<string, [keyof FiltersData, string]> = {
   departments: ["departments", "departments"],
 };
 
-export async function getFilterOptions(kind = "all", query = ""): Promise<Record<string, any>> {
+export async function getFilterOptions(
+  kind = "all",
+  query = "",
+  limit = 0,
+): Promise<Record<string, any>> {
   const data = await loadFilters();
   const q = query.toLowerCase();
-  const rows = (srcKey: keyof FiltersData) =>
-    (data[srcKey] as CodeDesc[])
-      .filter((it) =>
-        !q ||
-        String(it.DESC).toLowerCase().includes(q) ||
-        String(it.CODE).toLowerCase().includes(q),
-      )
-      .map((it) => ({ code: String(it.CODE), name: String(it.DESC) }));
+  const cap = Math.max(0, Math.trunc(limit));
+  // terms arrive newest-first upstream, so a limit yields the most recent terms
+  const rows = (srcKey: keyof FiltersData) => {
+    const all = (data[srcKey] as CodeDesc[]).filter((it) =>
+      !q ||
+      String(it.DESC).toLowerCase().includes(q) ||
+      String(it.CODE).toLowerCase().includes(q),
+    );
+    const kept = cap ? all.slice(0, cap) : all;
+    return kept.map((it) => ({ code: String(it.CODE), name: String(it.DESC) }));
+  };
 
   if (kind === "all") {
     const out: Record<string, any> = {};
@@ -539,26 +631,37 @@ export async function getCourse(
   courseCode: string,
   category = "CWSP",
   includeDescription = true,
+  compact = true,
 ): Promise<Record<string, any>> {
   const res = await searchCourses({
     term,
     category,
     course_code: courseCode,
     include_description: includeDescription,
-    max_results: 25,
+    compact,
+    max_results: 50,
     fetch_all: true,
   });
-  const courses: any[] = res.courses ?? [];
-  if (!courses.length) {
-    return { found: false, term: res.query.term, course_code: courseCode };
+  const all: any[] = res.courses ?? [];
+  if (!all.length) {
+    return { found: false, term: res.query.term, course_code: courseCode, count: 0, courses: [] };
   }
-  const wanted = courseCode.trim().toUpperCase();
-  const exact = courses.filter((c) => String(c.code ?? "").toUpperCase() === wanted);
-  const course = exact.length ? exact[0] : courses[0];
+  // Prefer exact code matches; fall back to prefix hits (e.g. "COP3502" → COP3502C).
+  const wanted = courseCode.trim().replace(/\s+/g, "").toUpperCase();
+  const exact = all.filter((c) => String(c.code ?? "").toUpperCase() === wanted);
+  const courses = exact.length ? exact : all;
+  const others = all.filter((c) => !courses.includes(c));
   return {
     found: true,
     term: res.query.term,
-    course,
-    other_matches: courses.filter((c) => c !== course).map((c) => c.code),
+    course_code: courseCode,
+    count: courses.length,
+    // A special-topics code yields ONE ENTRY PER TOPIC (same courseId, different
+    // name) — all are returned so every topic is identifiable, not just the first.
+    courses,
+    ...(others.length
+      ? { prefix_matches: others.map((c) => ({ code: c.code, name: c.name, courseId: c.courseId })) }
+      : {}),
+    data_notes: res.data_notes,
   };
 }

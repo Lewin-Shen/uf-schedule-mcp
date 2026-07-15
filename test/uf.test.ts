@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildQuery,
+  dedupeCourses,
+  formatMeet,
   periodToPosition,
   resolveCategory,
   resolveCredSrch,
@@ -156,4 +158,62 @@ test("resolveCredSrch aliases", () => {
   assert.equal(resolveCredSrch("at least"), "GE");
   assert.equal(resolveCredSrch("at most"), "LE");
   assert.equal(resolveCredSrch("equal"), "EQ");
+});
+
+// --- P4 dedupe --------------------------------------------------------------
+
+test("dedupe merges page-boundary duplicates (same courseId AND name)", () => {
+  const out = dedupeCourses([
+    { code: "ISM6413", courseId: "111", name: "Systems Analysis", sections: [{ classNumber: 1 }] },
+    { code: "ISM6413", courseId: "111", name: "Systems Analysis", sections: [{ classNumber: 2 }] },
+  ]);
+  assert.equal(out.length, 1);
+  assert.deepEqual(out[0].sections.map((s: any) => s.classNumber), [1, 2]);
+});
+
+test("dedupe PRESERVES special topics that share a courseId but differ by name", () => {
+  // All 6 real EEL5934 topics share courseId 011774 — merging on courseId alone
+  // (as a naive fix would) collapses them into one and destroys topic search.
+  const topics = ["GPU Computing", "Applied Machine Learning", "Formal Methods Robotics & AI"];
+  const out = dedupeCourses(
+    topics.map((t, i) => ({
+      code: "EEL5934",
+      courseId: "011774",
+      name: `Special Topics in Electrical Engineering: ${t}`,
+      sections: [{ classNumber: 900 + i }],
+    })),
+  );
+  assert.equal(out.length, 3);
+  assert.equal(new Set(out.map((c: any) => c.courseId)).size, 1);
+});
+
+test("dedupe does not duplicate an identical section seen twice", () => {
+  const out = dedupeCourses([
+    { code: "X", courseId: "1", name: "N", sections: [{ classNumber: 5 }] },
+    { code: "X", courseId: "1", name: "N", sections: [{ classNumber: 5 }] },
+  ]);
+  assert.equal(out[0].sections.length, 1);
+});
+
+// --- P1 meet mapping --------------------------------------------------------
+
+test("formatMeet returns TBA when upstream gives none (login-gated)", () => {
+  assert.equal(formatMeet([]), "TBA");
+  assert.equal(formatMeet(undefined as any), "TBA");
+});
+
+test("formatMeet maps days/periods/bldg/room compactly", () => {
+  const out = formatMeet([
+    { meetDays: ["M", "W", "F"], meetPeriodBegin: "3", meetPeriodEnd: "3", meetBldgCode: "NEB", meetRoom: "201" },
+  ]) as any[];
+  assert.deepEqual(out, [{ days: "MWF", periods: "3", bldg: "NEB", room: "201" }]);
+});
+
+test("formatMeet renders a period range and clock time", () => {
+  const out = formatMeet([
+    { meetDays: ["R"], meetPeriodBegin: "7", meetPeriodEnd: "8", meetTimeBegin: "1:55 PM", meetTimeEnd: "3:50 PM" },
+  ]) as any[];
+  assert.equal(out[0].periods, "7-8");
+  assert.equal(out[0].days, "R");
+  assert.equal(out[0].time, "1:55 PM-3:50 PM");
 });

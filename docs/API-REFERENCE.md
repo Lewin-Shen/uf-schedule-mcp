@@ -43,7 +43,7 @@
 
 | Parameter | UI control | Type / values | Default | Example | Status |
 |---|---|---|---|---|---|
-| `credits` | "# of Credits" text field | integer | empty | `3` | ✅ |
+| `credits` | "# of Credits" text field | integer | empty | `3` | ✅ ⚠️ loose — also matches variable-credit ranges containing the value (see §7.1) |
 | `cred-srch` | "Options" dropdown (credit comparator) | enum: `EQ`, `LE`, `GE` | empty | `GE` | ✅ (see §2.5) |
 | `level-min` | "Minimum" (Course Level) dropdown | enum `1000`–`8000` | empty | `2000` | ✅ (see §2.6) |
 | `level-max` | "Maximum" (Course Level) dropdown | enum `1999`–`8999` | empty | `4999` | ✅ (see §2.6) |
@@ -432,31 +432,71 @@ Client formatting (from source): `period-b = (pos==1 ? "" : zeropad(pos))`, `per
 
 ---
 
-## 3. Pagination ✅ (mechanism) / ⚠️ (page size)
+## 3. Pagination ✅
 
 - Page with `last-control-number`; `0` = first page. Pass the response's `LASTCONTROLNUMBER` back to fetch the next page.
-- Response trailer fields: `LASTCONTROLNUMBER` (int), `RETRIEVEDROWS` (int, courses in this page), `TOTALROWS` (int, total matches).
+- Response trailer fields: `LASTCONTROLNUMBER` (int), `RETRIEVEDROWS` (int), `TOTALROWS` (int).
 - `LASTCONTROLNUMBER` is an **opaque internal cursor, not a row index** — observed `4384` for a 12-row result, `2320` for a 1-row result. ✅
-- Page size believed ≤ 50 courses; multi-page round-trip not yet walked. ⚠️
+- Page size ≈ 50 **rows**.
 
-| Query | LASTCONTROLNUMBER | RETRIEVEDROWS | TOTALROWS |
-|---|---|---|---|
-| `dept=19080000&prog-level=GRAD&term=2268&category=CWSP` | 4384 | 12 | 12 |
-| `course-code=COP3502&term=2268&category=CWSP` | 2320 | 1 | 1 |
+> **⚠️ `TOTALROWS` / `RETRIEVEDROWS` count ROWS (course codes), *not* course objects in `COURSES[]`.**
+> A special-topics code expands to **one course object per topic** under a single row:
+> `course-code=EEL5934&term=2268` returns `TOTALROWS: 1` and `RETRIEVEDROWS: 1` — but **six**
+> entries in `COURSES[]`. ✅ verified
+>
+> Paginate by accumulating `RETRIEVEDROWS` until it reaches `TOTALROWS`. Comparing
+> `COURSES.length` against `TOTALROWS` ends pagination early and silently drops pages.
+
+**Duplicate course objects across page boundaries:** the same `courseId` + `name` can appear as two
+separate entries with disjoint `sections[]`. Merge on **`courseId` + `name`** — *not* `courseId`
+alone, because every special-topics topic shares one `courseId` (all six `EEL5934` topics are
+`courseId: 011774`), so a `courseId`-only merge collapses distinct topics. ✅ verified
+
+| Query | LASTCONTROLNUMBER | RETRIEVEDROWS | TOTALROWS | COURSES[] |
+|---|---|---|---|---|
+| `dept=19080000&prog-level=GRAD&term=2268&category=CWSP` | 4384 | 12 | 12 | 12 |
+| `course-code=COP3502&term=2268&category=CWSP` | 2320 | 1 | 1 | 1 |
+| `course-code=EEL5934&term=2268&category=CWSP` | — | 1 | 1 | **6** (one per topic) |
 
 ---
 
-## 4. Response structure ✅ (fields) / ⚠️ (meetTimes)
+## 4. Response structure ✅
 
 Top level: **array with one object** `{ COURSES:[…], LASTCONTROLNUMBER:int, RETRIEVEDROWS:int, TOTALROWS:int }`.
 
-**Course object:** `code`, `courseId` (6-digit), `name`, `openSeats` (int|null — `null` for future terms), `termInd`, `description`, `prerequisites`, `sections[]`.
+**Course object:** `code`, `courseId` (6-digit), `name`, `openSeats` (always `null` — see below), `termInd`, `description`, `prerequisites`, `sections[]`.
+
+> **`name` carries the special-topics suffix** (e.g. `"Special Topics in Electrical Engineering: GPU
+> Computing"`), but the `course-title` **request** param matches only the *base* catalog title — so
+> `course-title=GPU` finds nothing. Filter client-side on `name` to search topics. ✅ verified
 
 **Section object (key fields):** `number`, `classNumber` (int), `display`, `credits` (int **or** `"VAR"`), `credits_min`, `credits_max`, `gradBasis` (`GRD`/`SUS`/…), `acadCareer` (`UGRD`/`GRAD`/…), `deptCode` (int), `deptName`, `sectWeb` (delivery code — see below), `note`, `dNote`, `genEd[]`, `quest[]`, `courseFee` (float), `EEP` (`Y`/`N`), `grWriting` (`Y`/`N`), `addEligible` (`Y`/`N`), `lateFlag`, `dropaddDeadline` (MM/DD/YYYY), `pastDeadline` (bool), `startDate`, `endDate`, `instructors[]` (`{name}`), `meetTimes[]`, `waitList` (`{isEligible:Y/N, cap:int, total:int}`), `simpleSyllabusParams`, `isStartDate45DaysOut` (bool). Optional flags: `isElal`+`elalAttr` (e.g. "Independent Study", "Internship"), `isAICourse`+`aiAttr`.
 
 **`sectWeb` codes (from the results decoder in source):** `AD` = Online (100%), `PD` = Online (80-99%), `HB` = Hybrid, `P`/`PC` = Primarily Classroom. ✅
 
-**`meetTimes[]`** was empty in all sampled Fall 2026 sections; element schema (expected `meetNo`, `meetDays`, `meetTimeBegin/End`, `meetPeriodBegin/End`, `meetBuilding`, `meetBldgCode`, `meetRoom`) still to confirm on a term with published times. ⚠️
+### ⛔ Login-gated fields: `meetTimes[]` and `openSeats`
+
+**The public API never returns meeting times or seat counts.** This is a UF access control, not a
+term-recency effect and not a client bug. ✅ verified
+
+Evidence:
+
+- `meetTimes: []` on **every** section sampled: EEE5544 (Fall 2026), **MAC2311 Fall 2025** — a
+  *completed* term with 50+ in-person `sectWeb: PC` lecture sections — and 0/130 ECE + 0/246 Math
+  sections across whole-department pulls.
+- The SOC UI states it directly on each expanded section: *“Log in to view additional details like
+  **locations, dates, times**, and final exams.”* Logged-out, the UI shows only `Meet: <delivery
+  type>` — matching the API exactly.
+- The SOC SPA calls **no other data endpoint** (network log: `/apix/soc/schedule`, `/apix/soc/filters`,
+  `/apix/soc/getsyllabusconfig`, plus maintenance/message) — so there is no separate meeting-times
+  source to fall back on.
+- `openSeats` is `null` universally for the same reason.
+
+Element schema, if an authenticated session ever supplies it (expected, unconfirmed): `meetNo`,
+`meetDays[]`, `meetTimeBegin/End`, `meetPeriodBegin/End`, `meetBuilding`, `meetBldgCode`, `meetRoom`. ⚠️
+
+**Syllabi** are not in SOC at all; `simpleSyllabusParams` points at Simple Syllabus, which is
+GatorLink-gated.
 
 ---
 
@@ -480,11 +520,23 @@ Top level: **array with one object** `{ COURSES:[…], LASTCONTROLNUMBER:int, RE
 
 ---
 
-## 7. Remaining open items
+## 7. Matching-behaviour gotchas ✅
 
-1. `no-open-seats` filter **direction** (include vs restrict-to full sections) — no UI control in the current panel to observe; needs a data-populated term.
-2. `meetTimes[]` element schema — sample a term with published meeting times (e.g. `term=2261`).
-3. Multi-page pagination walk (confirm ≤50 page size and cursor round-trip).
-4. `fitsSchedule=true` behavior when logged in (login-gated).
-5. `var-cred`, `ge`, `ge-d` — present in the request but have no control in the current UI (treated as vestigial/legacy).
-6. `/apix/soc/getsyllabusconfig` exact payload.
+1. **`credits` + `cred-srch=EQ` is a LOOSE filter.** It also matches *variable*-credit courses whose
+   **range includes** the value — `credits=2&cred-srch=EQ` on `dept=16200000` (English) returns only
+   `VAR 1–15` / `VAR 1–5` courses, none of which is a 2-credit course. To find fixed-credit courses,
+   check `credits` in the response (literal number vs `"VAR"`). ✅ verified
+2. **`course-title` matches the base catalog title only** — it misses special-topics suffixes. Filter
+   on the course-level `name` client-side instead (§4).
+3. **`course-code` is a prefix match** and strips whitespace client-side: `COP3502` → `COP3502C`.
+4. **`gradBasis: "SUS"`** is a reliable marker for generic S/U credit-holders (research, thesis,
+   dissertation, individual work, supervised teaching); `"GRD"` = graded coursework.
+
+## 8. Remaining open items
+
+1. `no-open-seats` filter **direction** (include vs restrict-to full sections) — no UI control in the
+   current panel to observe, and seat data is login-gated, so it can't be verified anonymously.
+2. `meetTimes[]` element schema — requires an authenticated session (§4); unverifiable publicly.
+3. `fitsSchedule=true` behavior when logged in (login-gated).
+4. `var-cred`, `ge`, `ge-d` — present in the request but have no control in the current UI (treated as vestigial/legacy).
+5. `/apix/soc/getsyllabusconfig` exact payload.
