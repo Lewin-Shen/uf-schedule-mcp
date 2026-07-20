@@ -26,28 +26,6 @@ It reads two public UF systems:
 > Public data only — it exercises the same public pages a normal visitor would. No login, no
 > scraping of protected pages, no rate-limit evasion.
 
-## What you get — and what you don't
-
-Read this before building anything on the output; some of the most-wanted fields are gated by UF.
-
-- **Meeting times, rooms, and open seats are login-gated** on the schedule system. `search_courses`
-  and `get_course` return `meet: "TBA"` and `openSeats: null` — the data exists, it's just
-  GatorLink-only. (A section's public **syllabus** *does* expose its meeting time and room — see below.)
-- **`get_syllabus` returns JSON, not the PDF.** It gives you the structured content Simple Syllabus
-  uses to render its page. You **cannot** produce, attach, or reproduce the official syllabus PDF —
-  work from the extracted text/fields instead. Within the result:
-  - `sections` = the **authored syllabus body** — the content that appears in the PDF.
-  - `metadata` = **extra scheduling data** (credits, meeting time + room, exam date, term dates) that
-    is registrar-sourced and **not printed in the syllabus PDF**. When a public syllabus exists, this
-    is the only unauthenticated place the meeting time/room appears.
-- **Only public syllabi** (`visibility: general_public`) are retrievable; restricted ones return a
-  clean not-found.
-
-**Verification:** the server instructs the assistant to end every deliverable with a one-line note
-urging you to confirm details against the **authenticated** one.uf.edu Schedule of Courses and Simple
-Syllabus — because gated/registrar-sourced fields can change and aren't independently checkable here.
-Treat this tool's output as a fast first pass, not the system of record.
-
 ## Install
 
 ### Claude Desktop — drag and drop (recommended)
@@ -88,6 +66,57 @@ Run `npm install && npm run build` first so `dist/` exists, then edit `claude_de
 
 Fully quit and reopen Claude Desktop.
 </details>
+
+### Codex — CLI, IDE extension, or ChatGPT desktop app
+
+Codex has no bundle format; it runs the same stdio server, and its CLI, IDE extension, and the ChatGPT
+desktop app **share one MCP config** — so you add it once, any way you like:
+
+- **CLI:** `codex mcp add uf-schedule -- npx -y github:Lewin-Shen/uf-schedule-mcp`
+- **GUI (IDE extension / desktop app):** Settings (gear) → **MCP servers** → **Add server** → type
+  **STDIO**, name `uf-schedule`, command `npx`, args `-y github:Lewin-Shen/uf-schedule-mcp`; Save, then
+  restart.
+- **Or `~/.codex/config.toml`:**
+
+  ```toml
+  [mcp_servers.uf-schedule]
+  command = "npx"
+  args = ["-y", "github:Lewin-Shen/uf-schedule-mcp"]
+  ```
+
+It's a local (stdio) server, so add it as a **local MCP server**, not a remote "connector."
+
+### Any other MCP client
+
+It's plain MCP over stdio — run it with `npx -y github:Lewin-Shen/uf-schedule-mcp` (or `node dist/index.js`
+from a local build) and point any MCP-compatible client at that command.
+
+---
+
+## What you get — and what you don't
+
+Read this before building anything on the output; some of the most-wanted fields are gated by UF.
+
+- **Meeting times and rooms are gated on the schedule system, but recoverable from the syllabus.**
+  `search_courses` / `get_course` return `meet: "TBA"` — one.uf.edu shows times and rooms only to
+  logged-in users. But when a section has a **public syllabus**, `get_syllabus` returns its meeting
+  time **and room** in `metadata` (from Simple Syllabus's registrar feed). So the data *is* available
+  through this server — it just comes from the syllabus tool, not the schedule tools.
+- **Open seats are login-only, everywhere.** `openSeats` is always `null`; live enrollment counts are
+  in neither the public schedule API nor a syllabus, so this server genuinely can't provide them.
+- **`get_syllabus` returns JSON, not the PDF.** It gives you the structured content Simple Syllabus
+  uses to render its page. You **cannot** produce, attach, or reproduce the official syllabus PDF —
+  work from the extracted text/fields instead. Within the result:
+  - `sections` = the **authored syllabus body** — the content that appears in the PDF.
+  - `metadata` = **extra scheduling data** (credits, meeting time + room, exam date, term dates) that
+    is registrar-sourced and **not printed in the syllabus PDF**.
+- **Only public syllabi** (`visibility: general_public`) are retrievable; restricted ones return a
+  clean not-found.
+
+**Verification:** the server instructs the assistant to end every deliverable with a one-line note
+urging you to confirm details against the **authenticated** one.uf.edu Schedule of Courses and Simple
+Syllabus — because gated/registrar-sourced fields can change and aren't independently checkable here.
+Treat this tool's output as a fast first pass, not the system of record.
 
 ## Tools
 
