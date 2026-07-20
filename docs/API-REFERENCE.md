@@ -532,6 +532,42 @@ GatorLink-gated.
 4. **`gradBasis: "SUS"`** is a reliable marker for generic S/U credit-holders (research, thesis,
    dissertation, individual work, supervised teaching); `"GRD"` = graded coursework.
 
+## 9. Simple Syllabus — syllabus retrieval ✅ (separate system)
+
+Syllabus **content** lives in Simple Syllabus (`ufl.simplesyllabus.com`), not SOC. Public docs
+(`visibility: general_public`) are retrievable **unauthenticated**. All verified live 2026-07-15.
+
+**Two-hop model** (no "syllabus for course X" endpoint; join key is the class number):
+
+1. **Search → handle.** `GET /api2/doc-library-search?search={query}&page={n}&page_size=50`
+   Returns `{sys, pagination, info, items[]}`. Each item:
+   - `code` — internal document **handle** (e.g. `nleuuj5pi`); the join key to hop 2. Opaque, cannot be guessed.
+   - `title` — **`"SUBJ NUMBER[suffix] CLASSNUMBER"`**, e.g. `"ENU 6051 11718"`, `"COP 3502C 11565"`. The trailing number is the schedule **`classNumber`** (exact match). ✅
+   - `sub_title` — the course **name** (e.g. "Radiation Interaction Basics..."). *(The debrief had `title`/`sub_title` swapped.)*
+   - `term_name` — human string (`"Fall 2026"`); `term_id` is an opaque per-term UUID, **not** the schedule term code. Join on `term_name`.
+   - `editors[]` (instructors), `visibility`, `has_published_uploads`.
+   - Search is **space-insensitive** (`ENU6051` == `ENU 6051`) and a broad relevance match (returns many courses/terms) — disambiguate client-side on course code + class number + `term_name`.
+
+2. **Handle → content.** `GET /api2/doc-full-page-get?code={handle}`
+   Wrapped in the **same `{items:[…]}` envelope**; the doc is at **`items[0].doc_data`**:
+   - `properties` — flat string map. Observed: `full_name`, `course_number`, `ca_2` (catalog
+     description), `ca_16` (credits), `ca_10` (term dates), `ca_11` (exam), **`ca_21` (meeting
+     times + building/room, HTML `<br/>`-separated)**. `ca_*` keys are opaque — map defensively.
+   - `components[]` — ~17 ordered syllabus sections. Keys: `html`, `component_type`
+     (`content`/`instructor`/`material`), `sort_order`, `word_count`, `is_public`, `component_id`.
+     **No title/name field** — derive a heading from the HTML (first `<h1-6>`/bold/line). Sort by
+     `sort_order`, strip HTML to text.
+
+**Notable:** `ca_21` gives the **meeting time and room** that the SOC schedule API gates behind
+login (§4) — so a public syllabus recovers that data for courses that have one.
+
+**Access notes:**
+- The edge **403s non-browser User-Agents** — send a browser `User-Agent` (verified: custom UA → 403, browser UA → 200). ✅
+- No server-side PDF: `uploads` is empty, Print is client-side `window.print()`, and guessed PDF
+  endpoints 500. `GET /api2/doc-png/{code}/{slug}` returns a PNG snapshot (not extractable text) — ignore.
+- Restricted docs (not `general_public`) won't appear in search / 403 on fetch — handle as not-found.
+- Ignore the SPA's auxiliary calls (`doc-add-view`, `doc-version-check`, `app-state`); one 500s intermittently.
+
 ## 8. Remaining open items
 
 1. `no-open-seats` filter **direction** (include vs restrict-to full sections) — no UI control in the

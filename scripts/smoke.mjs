@@ -5,6 +5,7 @@
 // only a live call can prove: filters that were never field-tested, and the
 // special-topics / pagination behaviour.
 import { getCourse, getFilterOptions, searchCourses } from "../dist/uf.js";
+import { getSyllabus } from "../dist/syllabus.js";
 
 let pass = 0;
 let fail = 0;
@@ -142,6 +143,42 @@ await check("get_filter_options(terms, limit=5) returns 5 newest terms", async (
   const r = await getFilterOptions("terms", "", 5);
   assert(r.terms.length === 5, `got ${r.terms.length}`);
   assert(r.terms[0].code === "2268", `newest term is ${r.terms[0].code}`);
+});
+
+// --- get_syllabus (Simple Syllabus two-hop) ----------------------------------
+await check("get_syllabus resolves a single section by class_number", async () => {
+  const r = await getSyllabus({ course_code: "ENU6051", class_number: 11718, term: "2268" });
+  assert(r.found && !r.ambiguous, "not resolved to a single syllabus");
+  assert(r.handle === "nleuuj5pi", `handle=${r.handle}`);
+  assert(r.metadata?.credits === "3", `credits=${r.metadata?.credits}`);
+  assert(/MAEB|Weil/.test(r.metadata?.meetingTimes ?? ""), "meetingTimes/location missing");
+  assert((r.sections?.length ?? 0) >= 10, `only ${r.sections?.length} sections`);
+  const headings = r.sections.map((s) => s.heading).join("|");
+  assert(/Evaluation|Grading|Objectives/.test(headings), "expected syllabus headings missing");
+});
+
+await check("get_syllabus join key = schedule classNumber (title match)", async () => {
+  // The class number in Simple Syllabus title == schedule classNumber.
+  const sched = await searchCourses({ term: "2268", course_code: "ENU6051" });
+  const classNum = String(sched.courses[0].sections[0].classNumber);
+  const r = await getSyllabus({ course_code: "ENU6051", class_number: classNum, term: "2268" });
+  assert(r.found && !r.ambiguous, `classNumber ${classNum} did not resolve a syllabus`);
+});
+
+await check("get_syllabus without class_number returns candidates (no guessing)", async () => {
+  const r = await getSyllabus({ course_code: "COP3502C", term: "Fall 2026" });
+  assert(r.ambiguous && r.count > 1, "expected multiple candidates");
+  assert(r.candidates.every((c) => c.class_number && c.handle), "candidates missing class_number/handle");
+});
+
+await check("get_syllabus returns a clean not-found for a bogus code", async () => {
+  const r = await getSyllabus({ course_code: "ZZZ9999", term: "2268" });
+  assert(r.found === false && /general_public|No public syllabus/.test(r.note ?? ""), "bad not-found shape");
+});
+
+await check("get_syllabus by handle skips search", async () => {
+  const r = await getSyllabus({ handle: "nleuuj5pi" });
+  assert(r.found && (r.sections?.length ?? 0) >= 10, "handle path failed");
 });
 
 console.log(`\n${pass}/${pass + fail} smoke checks passed`);

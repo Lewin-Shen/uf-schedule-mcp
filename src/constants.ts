@@ -7,6 +7,34 @@ export const HARD_PAGE_CAP = 40; // safety cap on auto-pagination
 export const USER_AGENT =
   "uf-schedule-mcp/1.0 (+https://one.uf.edu/soc/ public search wrapper)";
 
+// Simple Syllabus (UF) — public syllabus retrieval ---------------------------
+// The Simple Syllabus edge (Cloudflare) 403s non-browser User-Agents, so these
+// requests send a browser UA — matching what the public SPA sends. (Verified:
+// custom UA → 403, browser UA → 200.)
+export const SS_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+export const SS_BASE = "https://ufl.simplesyllabus.com/api2";
+export const SS_SEARCH_URL = `${SS_BASE}/doc-library-search`;
+export const SS_DOC_URL = `${SS_BASE}/doc-full-page-get`;
+export const SS_PAGE_SIZE = 50; // doc-library-search page size
+export const SS_HARD_PAGE_CAP = 6;
+
+/**
+ * Simple Syllabus `doc_data.properties` keys are opaque (`ca_*`), observed not
+ * documented — mapped defensively (missing keys are skipped). Values are flat
+ * strings (some contain HTML, e.g. meetingTimes uses <br/>).
+ */
+export const SS_PROPERTY_MAP: Record<string, string> = {
+  full_name: "fullName",
+  course_number: "courseNumber",
+  ca_2: "description",
+  ca_10: "termDates",
+  ca_11: "examDate",
+  ca_16: "credits",
+  ca_21: "meetingTimes", // location + periods — the schedule API gates these!
+};
+
 // Selecting this department is rewritten by UF to hons=true with dept cleared.
 export const HONORS_DEPT_CODE = "02030000";
 

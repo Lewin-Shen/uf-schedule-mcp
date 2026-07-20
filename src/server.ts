@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { getCourse, getFilterOptions, searchCourses, type SearchArgs } from "./uf.js";
+import { getSyllabus, type SyllabusArgs } from "./syllabus.js";
 
 // Emit minified JSON: 2-space indentation inflates these payloads by ~40% for
 // zero benefit to a model reading them (P3 — responses were overflowing).
@@ -13,8 +14,19 @@ function fail(err: unknown) {
   return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
 }
 
+const SERVER_INSTRUCTIONS = `UF Schedule of Courses + syllabus retrieval. Draws on TWO public University of Florida systems:
+- one.uf.edu Schedule of Courses (search_courses, get_course, get_filter_options) — course/section listings.
+- UF Simple Syllabus (get_syllabus) — published syllabus content.
+
+WHAT YOU GET, AND WHAT YOU DON'T:
+- Meeting times, room locations, and open-seat counts are GATED behind UF login on the schedule system. search_courses/get_course therefore return meet:"TBA" and openSeats:null. Do not report these as unavailable-in-general — they exist, they are just login-only.
+- get_syllabus returns the STRUCTURED JSON that Simple Syllabus uses to render its syllabus page. You CANNOT produce, attach, or reproduce the official syllabus PDF — provide the extracted text and fields instead. Within its result: "sections" is the authored syllabus body (what the PDF shows); "metadata" (credits, meeting time, room, exam date, term dates) is additional scheduling data that is NOT printed in the syllabus PDF. When one exists, a public syllabus is the only unauthenticated place the meeting time/room surfaces.
+- Only public (visibility=general_public) syllabi are retrievable; restricted ones return a clean not-found.
+
+REQUIRED — verification notice: End EVERY deliverable built from this data (tables, summaries, comparisons, recommendations) with a brief note telling the user to verify the details against the AUTHENTICATED sources — the logged-in one.uf.edu Schedule of Courses and Simple Syllabus — because some fields are login-gated or registrar-sourced metadata and can change. Keep it to one sentence; do not omit it.`;
+
 export function createServer(): McpServer {
-  const server = new McpServer({ name: "uf-schedule", version: "1.0.0" });
+  const server = new McpServer({ name: "uf-schedule", version: "1.0.0" }, { instructions: SERVER_INSTRUCTIONS });
 
   server.registerTool(
     "search_courses",
@@ -36,8 +48,9 @@ export function createServer(): McpServer {
         "compact (default true) trims bulky per-section fields; set compact=false for seats, wait-list, " +
         "acadCareer, fees, deadlines, gen-ed/quest attributes.\n" +
         "DATA LIMITS: openSeats is always null and meeting times/locations come back as \"TBA\" — UF gates both " +
-        "behind GatorLink login, so the public API never returns them. SOC carries no syllabi (Simple Syllabus " +
-        "is the login-gated source).",
+        "behind GatorLink login, so the public API never returns them (get_syllabus can recover meeting time/room " +
+        "for a section that has a public syllabus). SOC carries no syllabi (Simple Syllabus is the source).\n" +
+        "End any deliverable built from this with a one-line note to verify against the authenticated one.uf.edu.",
       inputSchema: {
         term: z.string().describe("Term code or description, e.g. '2268' or 'Fall 2026'"),
         category: z.string().optional().describe("CWSP (default), UFOL, or IA"),
@@ -144,6 +157,45 @@ export function createServer(): McpServer {
             args.compact ?? true,
           ),
         );
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_syllabus",
+    {
+      title: "Get a UF course syllabus (content JSON, for analysis — not the PDF)",
+      description:
+        "Fetch a section's published syllabus from UF Simple Syllabus as structured text, for an agent to read and " +
+        "act on (assess fit, compare courses, write a short description, extract topics/prerequisites/grading).\n" +
+        "You get the JSON that Simple Syllabus uses to render its page — NOT the PDF. You cannot produce or attach " +
+        "the official PDF; give the extracted text/fields instead.\n" +
+        "Give course_code (e.g. 'ENU6051'); add class_number (the schedule `classNumber`, e.g. 11718) and/or term " +
+        "to pin one section — otherwise all matching sections are returned as `candidates` to choose from.\n" +
+        "Returns: `sections` = the authored syllabus body (the content the PDF shows), each cleaned to text with a " +
+        "derived `heading` (truncated unless include_full_text=true); and `metadata` = ADDITIONAL scheduling data " +
+        "(credits, meeting time + room, exam date, term dates) that is registrar-sourced and NOT printed in the " +
+        "syllabus PDF. When a public syllabus exists, its metadata is the only unauthenticated place the meeting " +
+        "time/room appears (the schedule tools gate it).\n" +
+        "Only PUBLIC syllabi (visibility=general_public) are retrievable; restricted → clean not-found.\n" +
+        "End any deliverable using this with a one-line note to verify against the authenticated one.uf.edu + Simple Syllabus.",
+      inputSchema: {
+        course_code: z.string().optional().describe("e.g. 'ENU6051' or 'COP3502C' (spaces ignored)"),
+        class_number: z
+          .union([z.string(), z.number()])
+          .optional()
+          .describe("Schedule classNumber for exact section match (e.g. 11718)"),
+        term: z.string().optional().describe("Term code ('2268') or name ('Fall 2026') to disambiguate"),
+        handle: z.string().optional().describe("Simple Syllabus internal doc handle, if already known (skips search)"),
+        include_full_text: z.boolean().optional().describe("Default false; true = full section text (larger)"),
+        max_candidates: z.number().int().optional(),
+      },
+    },
+    async (args) => {
+      try {
+        return ok(await getSyllabus(args as SyllabusArgs));
       } catch (e) {
         return fail(e);
       }

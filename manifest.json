@@ -25,7 +25,8 @@
   "tools": [
     { "name": "search_courses", "description": "Search the UF Schedule of Courses with full filters." },
     { "name": "get_filter_options", "description": "List valid term / department / level / category codes." },
-    { "name": "get_course", "description": "Look up one course and its sections by code." }
+    { "name": "get_course", "description": "Look up one course and its sections by code." },
+    { "name": "get_syllabus", "description": "Fetch a section's published syllabus content from UF Simple Syllabus." }
   ],
   "compatibility": {
     "platforms": ["darwin", "win32", "linux"],

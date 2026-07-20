@@ -12,6 +12,7 @@ import {
   resolveTerm,
   _setFiltersCache,
 } from "../src/uf.js";
+import { htmlToText, parseTitle } from "../src/syllabus.js";
 
 // Seed the /filters cache so resolvers work with no network.
 _setFiltersCache({
@@ -158,6 +159,35 @@ test("resolveCredSrch aliases", () => {
   assert.equal(resolveCredSrch("at least"), "GE");
   assert.equal(resolveCredSrch("at most"), "LE");
   assert.equal(resolveCredSrch("equal"), "EQ");
+});
+
+// --- Simple Syllabus: title parsing + HTML→text -----------------------------
+
+test("parseTitle splits course code from class number", () => {
+  assert.deepEqual(parseTitle("ENU 6051 11718"), { code: "ENU6051", classNum: "11718" });
+  assert.deepEqual(parseTitle("COP 3502C 11565"), { code: "COP3502C", classNum: "11565" });
+});
+
+test("parseTitle handles a missing/invalid class number", () => {
+  assert.deepEqual(parseTitle("IDS 2935"), { code: "IDS2935", classNum: "" });
+  assert.deepEqual(parseTitle(""), { code: "", classNum: "" });
+});
+
+test("htmlToText strips tags, converts <br>, decodes entities", () => {
+  assert.equal(
+    htmlToText("TH | Period 9<br />T | Period 8-9 &amp; lab"),
+    "TH | Period 9\nT | Period 8-9 & lab",
+  );
+  assert.equal(htmlToText("<p>Hello <b>world</b></p>"), "Hello world");
+  assert.equal(htmlToText("caf&#233; &#x2014; test"), "café — test");
+  assert.equal(htmlToText(""), "");
+  assert.equal(htmlToText(null), "");
+});
+
+test("htmlToText turns list items into bullets", () => {
+  const out = htmlToText("<ul><li>alpha</li><li>beta</li></ul>");
+  assert.ok(out.includes("• alpha"), out);
+  assert.ok(out.includes("• beta"), out);
 });
 
 // --- P4 dedupe --------------------------------------------------------------
